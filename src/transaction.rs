@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::{db::Account, error::{BankResult, Error}};
+use crate::{
+    db::Account,
+    error::{BankResult, Error},
+};
 
 pub struct Transaction {
     src: Arc<Account>,
@@ -8,14 +11,9 @@ pub struct Transaction {
     amount: usize,
 }
 
-
 impl Transaction {
     pub fn new(src: Arc<Account>, dst: Arc<Account>, amount: usize) -> Self {
-        Self {
-            src,
-            dst,
-            amount,
-        }
+        Self { src, dst, amount }
     }
 
     /// A simple locking rule:

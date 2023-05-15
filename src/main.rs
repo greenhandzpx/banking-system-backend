@@ -1,17 +1,22 @@
 use std::net::SocketAddr;
 
-use http_body_util::{Empty, BodyExt};
-use hyper::{server::conn::http1, service::service_fn, Request, body::{Incoming, Bytes}, Response, Method, StatusCode};
+use http_body_util::{BodyExt, Empty};
+use hyper::{
+    body::{Bytes, Incoming},
+    server::conn::http1,
+    service::service_fn,
+    Method, Request, Response, StatusCode,
+};
 use log::info;
-use operations::{login, open_account, delete_account, balance, transfer};
-use tokio::net::{TcpListener};
-
+use operations::{balance, delete_account, login, open_account, transfer};
+use tokio::net::TcpListener;
 
 mod db;
-mod utils;
-mod transaction;
 mod error;
+mod message;
 mod operations;
+mod transaction;
+mod utils;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
@@ -41,17 +46,16 @@ async fn handle_request(req: Request<Incoming>) -> Result<Response<BoxBody>, Gen
     }
 }
 
-
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
     env_logger::init();
 
     info!("start server");
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    db::init().await;
+
+    // let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    let addr = SocketAddr::from(([10, 251, 176, 190], 80));
 
     // We create a TcpListener and bind it to 127.0.0.1:3000
     let listener = TcpListener::bind(addr).await?;

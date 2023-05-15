@@ -1,44 +1,49 @@
-use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
-use tokio::sync::Mutex;
+// use tokio::sync::Mutex;
 
-use crate::utils::RecycleAllocator;
+use crate::utils::{generate_password, RecycleAllocator};
 
 use lazy_static::*;
+use log::info;
+use tokio::sync::Mutex;
 
 pub struct AccountManager {
     // account id -> account
-    db: Mutex<BTreeMap<usize, Arc<Account>>>,
-    account_id_allocator: Mutex<RecycleAllocator>,
+    pub db: Mutex<BTreeMap<usize, Arc<Account>>>,
+    // pub account_id_allocator: Mutex<RecycleAllocator>,
 }
 
+lazy_static! {
+    pub static ref ACCOUNT_ID_ALLOCATOR: std::sync::Mutex<RecycleAllocator> =
+        std::sync::Mutex::new(RecycleAllocator::new());
+}
 
 impl AccountManager {
     pub fn new() -> Self {
         Self {
             db: Mutex::new(BTreeMap::new()),
-            account_id_allocator: Mutex::new(RecycleAllocator::new()),
+            // account_id_allocator: Mutex::new(RecycleAllocator::new()),
         }
-    } 
-    pub async fn create_account(&self) -> usize {
-        let account_id = self.account_id_allocator.lock().await.alloc();
-        let new_account = Account::new(account_id);
-        self.db.lock().await.insert(account_id, Arc::new(new_account));
+    }
+    pub async fn create_account(&self, username: String, amount: usize) -> usize {
+        let account_id = ACCOUNT_ID_ALLOCATOR.lock().unwrap().alloc();
+        let new_account = Account::new(account_id, username, amount);
+        self.db
+            .lock()
+            .await
+            .insert(account_id, Arc::new(new_account));
         account_id
     }
-    pub async fn get_account(&self, account_id: usize) -> Option<Arc<Account>> {
-        self.db.lock().await.get(&account_id).cloned()
-    }
 }
-
 
 lazy_static! {
     pub static ref ACCOUNT_MANAGER: AccountManager = AccountManager::new();
 }
 
-
 pub struct Account {
-    account_id: usize,
+    pub account_id: usize,
+    pub username: String,
     pub inner: Mutex<AccountInner>,
 }
 
@@ -47,12 +52,11 @@ pub struct AccountInner {
 }
 
 impl Account {
-    pub fn new(account_id: usize) -> Self {
+    pub fn new(account_id: usize, username: String, amount: usize) -> Self {
         Self {
             account_id,
-            inner: Mutex::new(AccountInner {
-                balance: 0,
-            }),
+            username,
+            inner: Mutex::new(AccountInner { balance: amount }),
         }
     }
     pub fn account_id(&self) -> usize {
@@ -60,12 +64,18 @@ impl Account {
     }
 }
 
+impl Drop for Account {
+    fn drop(&mut self) {
+        ACCOUNT_ID_ALLOCATOR
+            .lock()
+            .unwrap()
+            .dealloc(self.account_id);
+    }
+}
 
 lazy_static! {
     pub static ref USER_MANAGER: UserManager = UserManager::new();
 }
-
-
 
 pub struct UserManager {
     pub username_db: Mutex<BTreeMap<String, Arc<User>>>,
@@ -79,18 +89,53 @@ impl UserManager {
             token_db: Mutex::new(BTreeMap::new()),
         }
     }
+    pub async fn create_user(
+        &self,
+        username: String,
+        account_id: usize,
+        user_type: UserType,
+    ) -> String {
+        let password = generate_password();
+        let user = User {
+            account_id,
+            username: username.clone(),
+            password: password.clone(),
+            token: Mutex::new(None),
+            user_type,
+        };
+        self.username_db
+            .lock()
+            .await
+            .insert(username, Arc::new(user));
+        password
+    }
 }
 
-pub enum UserState {
-    Login,
-    Logout,
-}
+// pub enum UserState {
+//     Login,
+//     Logout,
+// }
 pub struct User {
     // acount id set
     pub account_id: usize,
     pub username: String,
     pub password: String,
-    pub state: Mutex<UserState>,
+    // pub state: Mutex<UserState>,
     pub token: Mutex<Option<String>>,
+    pub user_type: UserType,
 }
 
+pub enum UserType {
+    Clerk,
+    Customer,
+}
+
+pub async fn init() {
+    let account_id = ACCOUNT_MANAGER
+        .create_account("clerk1".to_string(), 0)
+        .await;
+    let password = USER_MANAGER
+        .create_user("clerk1".to_string(), account_id, UserType::Clerk)
+        .await;
+    info!("Init: create user clerk1, password {}", password);
+}
