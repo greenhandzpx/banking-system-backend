@@ -95,7 +95,10 @@ impl UserManager {
         account_id: usize,
         user_type: UserType,
     ) -> String {
-        let password = generate_password();
+        let mut password = generate_password();
+        if username == "clerk1" {
+            password = "magic123".to_string();
+        }
         let user = User {
             account_id,
             username: username.clone(),
@@ -134,6 +137,7 @@ pub async fn init() {
     let account_id = ACCOUNT_MANAGER
         .create_account("clerk1".to_string(), 0)
         .await;
+    // let password = "magic1234";
     let password = USER_MANAGER
         .create_user("clerk1".to_string(), account_id, UserType::Clerk)
         .await;

@@ -14,6 +14,7 @@ pub struct LoginReply {
     /// fail
     /// already
     pub state: String,
+    pub account_id: usize,
 }
 
 #[derive(Deserialize, Serialize)]

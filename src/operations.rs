@@ -18,15 +18,29 @@ use crate::{
     BoxBody, GenericError,
 };
 
+pub async fn preprocess(_: Request<Incoming>) -> Result<Response<BoxBody>, GenericError> {
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
+        .body(full(""))?;
+    return Ok(response);
+}
+
 pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericError> {
+    info!("handle login");
     let mut resp = LoginReply {
         token: "".to_string(),
         state: "".to_string(),
+        account_id: 0,
     };
 
     let headers = req.headers();
 
     if let Some(token) = headers.get(AUTHORIZATION) {
+        info!("login: recevie a toke");
         let token = token.to_str()?;
         if let Some(user) = USER_MANAGER.token_db.lock().await.get(token) {
             info!("User already login!, username {}", user.username);
@@ -34,6 +48,7 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
             resp = LoginReply {
                 token: token.to_string(),
                 state: LOGIN_STATE[2].to_string(),
+                account_id: 0, 
             };
             let ret_json = serde_json::to_string(&resp)?;
             let response = Response::builder()
@@ -43,7 +58,7 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
             return Ok(response);
         }
     }
-
+    info!("start to aggregate the body...");
     // Aggregate the body...
     let whole_body = req.collect().await?.aggregate();
     // Decode as JSON...
@@ -51,26 +66,33 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
     let username = user_info.username;
     let password = user_info.password;
 
+    info!("login: username {} password {}", username, password);
+
     if let Some(user) = USER_MANAGER.username_db.lock().await.get(&username) {
         if user.password != password {
             info!("Invalid password for user {}", username);
             resp = LoginReply {
                 token: "".to_string(),
                 state: LOGIN_STATE[1].to_string(),
+                account_id: 0, 
             };
         } else {
-            if let Some(token) = user.token.lock().await.as_ref() {
+            let token_lock = user.token.lock().await;
+            if let Some(token) = token_lock.clone() {
                 info!("No need to generate a new token for user {}", user.username);
                 resp = LoginReply {
                     token: token.clone(),
-                    state: LOGIN_STATE[1].to_string(),
+                    state: LOGIN_STATE[0].to_string(),
+                    account_id: user.account_id, 
                 };
             } else {
+                drop(token_lock);
                 info!("Generate a new token for user {}", user.username);
                 let token = generate_token();
                 resp = LoginReply {
                     token: token.clone(),
-                    state: LOGIN_STATE[1].to_string(),
+                    state: LOGIN_STATE[0].to_string(),
+                    account_id: user.account_id, 
                 };
                 *user.token.lock().await = Some(token.clone());
                 USER_MANAGER
@@ -78,6 +100,7 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
                     .lock()
                     .await
                     .insert(token, user.clone());
+                info!("Generate a new token for user {} finished", user.username);
             }
         }
     } else {
@@ -85,18 +108,24 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
         resp = LoginReply {
             token: "".to_string(),
             state: LOGIN_STATE[1].to_string(),
+            account_id: 0, 
         };
     }
 
+    info!("Login will give a response");
     let ret_json = serde_json::to_string(&resp)?;
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
         .body(full(ret_json))?;
     return Ok(response);
 }
 
 pub async fn open_account(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericError> {
+    info!("handle open_account");
     let mut resp = OpenAccountReply {
         password: "".to_string(),
         account_id: 0,
@@ -136,7 +165,7 @@ pub async fn open_account(req: Request<Incoming>) -> Result<Response<BoxBody>, G
                             .await;
                         resp.account_id = account_id;
                         resp.password = password;
-                        info!("Open account {} success", resp.account_id);
+                        info!("Open account {} success, password {}", resp.account_id, resp.password);
                     }
                 }
                 UserType::Customer => {
@@ -160,11 +189,15 @@ pub async fn open_account(req: Request<Incoming>) -> Result<Response<BoxBody>, G
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
         .body(full(ret_json))?;
     return Ok(response);
 }
 
 pub async fn delete_account(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericError> {
+    info!("handle delete_account");
     let mut resp = DeleteAccountReply {
         state: "success".to_string(),
     };
@@ -173,7 +206,10 @@ pub async fn delete_account(req: Request<Incoming>) -> Result<Response<BoxBody>,
 
     if let Some(token) = headers.get(AUTHORIZATION) {
         let token = token.to_str()?;
-        if let Some(user) = USER_MANAGER.token_db.lock().await.get(token) {
+        let mut token_db = USER_MANAGER.token_db.lock().await;
+        let mut username_db = USER_MANAGER.username_db.lock().await;
+        let mut account_db = ACCOUNT_MANAGER.db.lock().await;
+        if let Some(user) = token_db.get(token) {
             match user.user_type {
                 UserType::Clerk => {
                     // Aggregate the body...
@@ -181,39 +217,27 @@ pub async fn delete_account(req: Request<Incoming>) -> Result<Response<BoxBody>,
                     // Decode as JSON...
                     let delete_account_args: DeleteAccountArgs =
                         serde_json::from_reader(whole_body.reader())?;
-                    if !ACCOUNT_MANAGER
-                        .db
-                        .lock()
-                        .await
+                    if !account_db
                         .contains_key(&delete_account_args.account_id)
                     {
                         info!("No such account id {}", delete_account_args.account_id);
                         resp.state = "fail".to_string();
                     } else {
-                        let account = ACCOUNT_MANAGER
-                            .db
-                            .lock()
-                            .await
+                        let account = account_db
                             .get(&delete_account_args.account_id)
                             .cloned()
                             .unwrap();
-                        let user = USER_MANAGER
-                            .username_db
-                            .lock()
-                            .await
+                        let user = username_db
                             .get(&account.username)
                             .cloned()
                             .unwrap();
                         let username = user.username.clone();
                         // let token = user.token.lock().await();
-                        USER_MANAGER.username_db.lock().await.remove(&username);
+                        username_db.remove(&username);
                         if let Some(token) = user.token.lock().await.as_ref() {
-                            USER_MANAGER.token_db.lock().await.remove(token);
+                            token_db.remove(token);
                         }
-                        ACCOUNT_MANAGER
-                            .db
-                            .lock()
-                            .await
+                        account_db
                             .remove(&delete_account_args.account_id);
                         info!("Delete account {} success", delete_account_args.account_id);
                     }
@@ -239,11 +263,15 @@ pub async fn delete_account(req: Request<Incoming>) -> Result<Response<BoxBody>,
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
         .body(full(ret_json))?;
     return Ok(response);
 }
 
 pub async fn balance(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericError> {
+    info!("handle balance");
     let mut resp = BalanceReply {
         balance: 0,
         state: "".to_string(),
@@ -288,11 +316,15 @@ pub async fn balance(req: Request<Incoming>) -> Result<Response<BoxBody>, Generi
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
         .body(full(ret_json))?;
     return Ok(response);
 }
 
 pub async fn transfer(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericError> {
+    info!("handle transfer");
     let mut resp = TransferReply {
         state: "success".to_string(),
     };
@@ -314,16 +346,11 @@ pub async fn transfer(req: Request<Incoming>) -> Result<Response<BoxBody>, Gener
                 );
                 resp.state = "fail".to_string();
             } else {
-                if let Some(src) = ACCOUNT_MANAGER
-                    .db
-                    .lock()
-                    .await
+                let account_db = ACCOUNT_MANAGER.db.lock().await;
+                if let Some(src) = account_db
                     .get(&transfer_args.src_account_id)
                 {
-                    if let Some(dst) = ACCOUNT_MANAGER
-                        .db
-                        .lock()
-                        .await
+                    if let Some(dst) = account_db
                         .get(&transfer_args.dst_account_id)
                     {
                         let txn = Transaction::new(src.clone(), dst.clone(), transfer_args.amount);
@@ -358,6 +385,9 @@ pub async fn transfer(req: Request<Incoming>) -> Result<Response<BoxBody>, Gener
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
         .body(full(ret_json))?;
     return Ok(response);
 }

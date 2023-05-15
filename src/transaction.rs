@@ -20,6 +20,9 @@ impl Transaction {
     /// We always lock the smaller account first.
     pub async fn start(&self) -> BankResult<()> {
         let (mut src_locked, mut dst_locked) = {
+            if self.src.account_id() == self.dst.account_id() {
+                return Ok(());
+            }
             if self.src.account_id() < self.dst.account_id() {
                 let src_locked = self.src.inner.lock().await;
                 let dst_locked = self.dst.inner.lock().await;
