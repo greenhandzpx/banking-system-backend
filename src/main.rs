@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use http_body_util::{Empty, BodyExt};
 use hyper::{server::conn::http1, service::service_fn, Request, body::{Incoming, Bytes}, Response, Method, StatusCode};
+use log::info;
 use operations::{login, open_account, delete_account, balance, transfer};
 use tokio::net::{TcpListener};
 
@@ -45,6 +46,11 @@ async fn handle_request(req: Request<Incoming>) -> Result<Response<BoxBody>, Gen
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+    env_logger::init();
+
+    info!("start server");
+
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
 
     // We create a TcpListener and bind it to 127.0.0.1:3000

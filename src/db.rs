@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
 
 use tokio::sync::Mutex;
 
@@ -59,3 +59,38 @@ impl Account {
         self.account_id
     }
 }
+
+
+lazy_static! {
+    pub static ref USER_MANAGER: UserManager = UserManager::new();
+}
+
+
+
+pub struct UserManager {
+    pub username_db: Mutex<BTreeMap<String, Arc<User>>>,
+    pub token_db: Mutex<BTreeMap<String, Arc<User>>>,
+}
+
+impl UserManager {
+    pub fn new() -> Self {
+        Self {
+            username_db: Mutex::new(BTreeMap::new()),
+            token_db: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+pub enum UserState {
+    Login,
+    Logout,
+}
+pub struct User {
+    // acount id set
+    pub account_id: usize,
+    pub username: String,
+    pub password: String,
+    pub state: Mutex<UserState>,
+    pub token: Mutex<Option<String>>,
+}
+

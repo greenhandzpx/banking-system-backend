@@ -1,3 +1,7 @@
+use http_body_util::{Full, BodyExt};
+use hyper::body::Bytes;
+use rand::{Rng, distributions::Alphanumeric};
+
 
 /// Used for allocating pid & tid
 pub struct RecycleAllocator {
@@ -35,3 +39,20 @@ impl RecycleAllocator {
     }
 }
 
+pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
+
+pub fn full<T: Into<Bytes>>(chunk: T) -> BoxBody {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+
+pub fn generate_token() -> String {
+    let rand_string: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(30)
+        .map(char::from)
+        .collect();
+    rand_string
+}
