@@ -40,8 +40,8 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
     let headers = req.headers();
 
     if let Some(token) = headers.get(AUTHORIZATION) {
-        info!("login: recevie a toke");
         let token = token.to_str()?;
+        info!("login: recevie a token: {}", token.clone());
         if let Some(user) = USER_MANAGER.token_db.lock().await.get(token) {
             info!("User already login!, username {}", user.username);
             // The user has already logined
@@ -54,6 +54,9 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-type, Authorization")
+                .header(header::ACCESS_CONTROL_ALLOW_METHODS, "PUT, POST, GET, DELETE, OPTIONS")
                 .body(full(ret_json))?;
             return Ok(response);
         }
@@ -102,6 +105,7 @@ pub async fn login(req: Request<Incoming>) -> Result<Response<BoxBody>, GenericE
                     .insert(token, user.clone());
                 info!("Generate a new token for user {} finished", user.username);
             }
+            info!("Login success, token {}", resp.token);
         }
     } else {
         info!("No such user {}", username);
